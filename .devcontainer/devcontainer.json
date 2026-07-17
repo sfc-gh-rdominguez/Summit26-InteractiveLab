@@ -1,0 +1,12 @@
+    {
+      "name": "Summit26 Interactive Lab",
+      "image": "mcr.microsoft.com/devcontainers/python:3.12-bullseye",
+      "postStartCommand": "pip install -q -r requirements.txt",
+      "customizations": {
+        "vscode": {
+          "extensions": [
+            "snowflake.snowflake-vsc"
+          ]
+        }
+      }
+    }

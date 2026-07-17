@@ -4,6 +4,15 @@
 --
 -- Run this in Snowsight as the user who needs a snow CLI connection.
 -- The PAT token is shown ONCE — it cannot be retrieved after this statement.
+--
+-- IMPORTANT: Do NOT run this file as a single batch (Ctrl+A → Run).
+-- Run it in two stages as marked below — the RESULT_SCAN at the end must
+-- immediately follow the ADD PROGRAMMATIC ACCESS TOKEN statement with no
+-- other queries in between, or it will fail to capture the token.
+--
+-- STAGE 1: Select and run everything from here down to the
+--          "── END OF STAGE 1 ──" marker.
+-- STAGE 2: Select and run the remaining statements together.
 -- =============================================================================
 
 USE WAREHOUSE SUMMIT_TRAD_WH;
@@ -24,6 +33,15 @@ BEGIN
 EXCEPTION
     WHEN OTHER THEN NULL;
 END;
+
+-- ── END OF STAGE 1 ──────────────────────────────────────────────────────────
+-- Run everything above this line first, then run Stage 2 below.
+-- ────────────────────────────────────────────────────────────────────────────
+
+-- ── STAGE 2 ─────────────────────────────────────────────────────────────────
+-- Select from here to the end of the file and run as a single batch.
+-- RESULT_SCAN must immediately follow ADD PROGRAMMATIC ACCESS TOKEN.
+-- ────────────────────────────────────────────────────────────────────────────
 
 ALTER USER
     ADD PROGRAMMATIC ACCESS TOKEN SNOW_CLI_PAT

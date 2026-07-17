@@ -1,361 +1,69 @@
 # Summit 2026 Interactive Lab
 ## Real-Time Arcade Score Streaming with Snowpipe Streaming + Interactive Tables
 
-Stream thousands of arcade game scores from across the globe into Snowflake
-in real time, materialise them into an **Interactive Table**, and query with an
-**Interactive Warehouse** — experiencing sub-second latency at scale.
+Stream thousands of arcade game scores from across the globe into Snowflake in real time, materialise them into an **Interactive Table**, and query with an **Interactive Warehouse** — experiencing sub-second latency at scale.
 
 ---
 
 ## Architecture
 
-```
- Python Generator
- ─────────────────
-  Arcade Score Events          Snowpipe Streaming SDK
-  (unlimited rows/sec) ──────► StreamingIngestClient
-  20 games                      └─ Channel 0      ──► ARCADE_SCORES
-  45 cities                                            (Interactive Table)
-  500 players                                          CLUSTER BY (GAME_ENDED_AT)
-                                                            │
-                                                            ▼
-                                                     SUMMIT_INT_WH
-                                                  (Interactive Warehouse, XS)
-                                                  Always-on · sub-second queries
+```mermaid
+flowchart LR
+    gen["Python Generator\n─────────────────\n20 games\n45 cities\n500 players"]
+    sdk["Snowpipe Streaming SDK\nStreamingIngestClient · Channel 0"]
+    table[("ARCADE_SCORES\nInteractive Table\nCLUSTER BY (GAME_ENDED_AT)")]
+    wh["SUMMIT_INT_WH\nInteractive Warehouse XS\nAlways-on · sub-second queries"]
+
+    gen -->|"unlimited rows/sec"| sdk
+    sdk -->|"channel API — no DML"| table
+    table --> wh
 ```
 
-Snowpipe Streaming uses the **channel API**, not SQL DML, so it writes rows
-directly into the Interactive Table — no intermediate landing table needed.
+Snowpipe Streaming uses the **channel API**, not SQL DML, so it writes rows directly into the Interactive Table — no intermediate landing table needed.
 
 ### Warehouse design
 
 | Warehouse | Type | Purpose |
 |---|---|---|
-| `SUMMIT_TRAD_WH` | Standard XS | Traditional warehouse for comparison benchmarks |
-| `SUMMIT_INT_WH` | **Interactive XS** | All lab queries; always-on for instant low-latency responses |
+| `SUMMIT_TRAD_WH` | Standard XS | Comparison baseline for Exercise 10 |
+| `SUMMIT_INT_WH` | **Interactive XS** | All lab queries; always-on, sub-second responses |
 
 ---
 
-## Prerequisites
+## Start here
 
-| Requirement | Details |
+**1. Choose your environment**
+
+| I want to... | Go to |
 |---|---|
-| Python | 3.9 – 3.13 |
-| Snowflake account | In a [supported region](https://docs.snowflake.com/en/user-guide/interactive#region-availability) for Interactive Tables/Warehouses |
-| Role | ACCOUNTADMIN (or CREATE WAREHOUSE + CREATE DATABASE privileges) |
-| OpenSSL | For RSA key-pair generation |
-| JMeter | For concurrency testing (optional) |
+| Use GitHub Codespaces (recommended) | [docs/01-env-codespaces.md](docs/01-env-codespaces.md) |
+| Run locally with Docker + VS Code | [docs/02-env-devcontainer.md](docs/02-env-devcontainer.md) |
+| Run natively on macOS / Windows / Linux | [docs/03-env-local.md](docs/03-env-local.md) |
+| Compare options first | [docs/00-choose-your-environment.md](docs/00-choose-your-environment.md) |
 
-### Supported regions (Interactive Tables GA)
+**2. Set up Snowflake** → [docs/04-snowflake-setup.md](docs/04-snowflake-setup.md)
 
-AWS: `us-east-1`, `us-west-2`, `us-east-2`, `ca-central-1`, `ap-northeast-1`, `ap-southeast-2`, `eu-central-1`, `eu-west-1`, `eu-west-2`
-GCP: `us-central1`, `us-east4`, `europe-west2/3/4`, `australia-southeast2`
-Azure: All Azure regions
+**3. Start the streamer** → [docs/05-start-streaming.md](docs/05-start-streaming.md)
 
----
+**4. Run the lab exercises** → [docs/06-exercises.md](docs/06-exercises.md)
 
-## Lab Setup
+**Optional: JMeter concurrency test** → [docs/07-jmeter.md](docs/07-jmeter.md)
 
-### 1 — Run the Snowflake setup script
-
-Open **`sql/01_setup.sql`** in Snowsight and run it using a **standard warehouse** session.
-
-The script provisions (in order):
-1. `ARCADE_STREAMING_ROLE` + `ARCADE_STREAMING_USER` + RSA keypair auth policy
-2. `ARCADE_DB` database + `PUBLIC` schema + `SUMMIT_TRAD_WH` standard warehouse
-3. `ARCADE_SCORES` **Interactive Table** (`CLUSTER BY (GAME_ENDED_AT)`, initially empty)
-4. `SUMMIT_INT_WH` **Interactive Warehouse** (XS, always-on)
-5. `ARCADE_REPORTING_POOL` compute pool (XS, for the optional Streamlit dashboard)
-6. Grants for `ARCADE_STREAMING_ROLE` and `ARCADE_LAB_READER`
-
-### 2 — Additional setup: Register RSA public key and configure network policy
-
-```bash
-bash sql/02_service_auth.sh
-```
-Generates `rsa_key.p8` / `rsa_key.pub` if they don't exist, then prints additional SQL statements to complete the setup process. This includes an `ALTER USER` statement to register the RSA public key with the service account user.
-
-**IMPORTANT:** You must copy and paste all generated SQL statements into Snowsight and run as `ACCOUNTADMIN` to complete the setup process.
-
-> `rsa_key.p8` is in `.gitignore` and must never be committed.
-
-
-### 3 — Create `profile.json`
-
-```bash
-cp profile.json.example profile.json
-```
-
-Edit with your account identifier and the **full path** to `rsa_key.p8` (the script from Step 2 prints the exact path):
-
-```json
-{
-    "user":             "ARCADE_STREAMING_USER",
-    "account":          "YOUR_ORG-YOUR_ACCOUNT",
-    "url":              "https://YOUR_ORG-YOUR_ACCOUNT.snowflakecomputing.com:443",
-    "private_key_file": "/full/path/to/rsa_key.p8",
-    "role":             "ARCADE_STREAMING_ROLE"
-}
-```
-
-For convenience, the output of the final SQL statement from Step 2 contains a fully populated JSON string which can be used direclty in `profile.json`.
-
-
-### 4 — Install Python dependencies
-
-```bash
-python -m venv .venv
-source .venv/bin/activate       # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-### 5 — Start the arcade streamer
-
-```bash
-cd python
-python arcade_streamer.py
-```
-
-```
-============================================================
- Summit 2026 – Arcade Scores Snowpipe Streamer
-============================================================
-  Account   : YOUR_ORG-YOUR_ACCOUNT
-  Database  : ARCADE_DB.PUBLIC
-  Pipe      : ARCADE_SCORES-STREAMING
-  Channels  : 1
-  Target    : unlimited rows/sec
-============================================================
-
-  [14:22:05]  rows:      512  |  512.0 rows/sec  |  errors: 0  |  elapsed:    1s
-  [14:22:05]  [latency] ARCADE_CHANNEL_0_A3F2B1C4: 540 ms avg
-  [14:22:10]  rows:    1,024  |  512.0 rows/sec  |  errors: 0  |  elapsed:    6s
-  [14:22:10]  [latency] ARCADE_CHANNEL_0_A3F2B1C4: 512 ms avg
-```
-
-### 6 — Wait for cache warm-up
-
-The `SUMMIT_INT_WH` Interactive Warehouse starts warming its local SSD cache
-as soon as it resumes. Wait **2–3 minutes** after the streamer starts before
-running interactive queries — the first few queries after
-resume will be slower while the cache populates.
+**Optional: Streamlit dashboard** → [STREAMLIT.md](STREAMLIT.md)
 
 ---
 
-## Lab Exercises
+## Supported regions
 
-Open **`sql/03_lab_queries.sql`** in Snowsight while the streamer is running.
+Interactive Tables and Warehouses are GA in:
 
-> **Tip:** Use `SUMMIT_INT_WH` for exercises marked ⚡ and `SUMMIT_TRAD_WH`
-> for exercises marked 🔧. Each `USE WAREHOUSE` statement is already in the
-> query file.
-
-### ⚡ Exercise 1 — Pipeline throughput
-
-Watch row counts grow in real time and measure live ingest throughput (rows/sec).
-The SDK-reported avg processing latency per channel is also printed to the streamer console.
-
-### ⚡ Exercise 2 — Data freshness
-
-Each row carries `GAME_ENDED_AT` (when the score was generated and sent, in UTC).
-The query measures **freshness**: how many seconds ago was the most recently
-committed row? The streamer's console also logs Snowflake-reported avg processing
-latency per channel via the SDK's `get_channel_statuses()` API.
-
-### ⚡ Exercise 3 — Global leaderboard (Interactive Warehouse)
-
-Top 20 scores of the last 24 hours. Notice how the `CLUSTER BY (GAME_ENDED_AT)`
-clustering key allows the Interactive Warehouse to skip irrelevant partitions
-and return results in under a second.
-
-### ⚡ Exercise 4 — Per-game top 5 (window function)
-
-Uses `QUALIFY ROW_NUMBER()` scoped to the last hour. Stays well within the
-interactive warehouse 5-second query limit.
-
-### ⚡ Exercise 5 — Country heat map
-
-Which countries are playing most right now? Japan and South Korea should
-dominate — the data generator weights cities by real gaming culture.
-
-### ⚡ Exercise 6 — Game popularity
-
-Pac-Man and Tetris lead; Joust and Tron are rare finds.
-
-### ⚡ Exercise 7 — Platform breakdown
-
-Arcade cabinets are most common for classic titles; Tetris goes mobile.
-
-### ⚡ Exercise 8 — Live score feed
-
-Re-run this every few seconds. Each execution hits data that arrived within the
-last 5 minutes — demonstrating end-to-end freshness from generator to
-Interactive Table.
-
-### 🔧 Exercise 9 — Achievement rarity
-
-Shows how rare badges ("Pacifist", "Triple Threat") require specific skill tier
-+ game mode + score conditions — rarely seen in thousands of rows.
-
-### ⚡ Exercise 10 — Interactive vs Traditional warehouse speed comparison
-
-Run the identical GROUP BY on both warehouses and compare in Query History.
-The Interactive Warehouse wins at high concurrency thanks to local SSD caching
-and pre-computed index metadata.
-
-### ⚡ Exercise 11 — Concurrency demo (JMeter load test)
-
-Use the JMeter load testing tool to simulate 50 concurrent users hitting the
-warehouse. See [Concurrency Testing with JMeter](#concurrency-testing-with-jmeter) below.
-
-### 🥚 Bonus A — Find the ghost player
-
-Someone has been logging perfect scores. Can you find them?
+- **AWS:** `us-east-1`, `us-west-2`, `us-east-2`, `ca-central-1`, `ap-northeast-1`, `ap-southeast-2`, `eu-central-1`, `eu-west-1`, `eu-west-2`
+- **GCP:** `us-central1`, `us-east4`, `europe-west2/3/4`, `australia-southeast2`
+- **Azure:** All Azure regions
 
 ---
 
-### ⚡ Bonus B — Time Travel on an Interactive Table
-
-```sql
-SELECT COUNT(*) FROM ARCADE_SCORES AT(OFFSET => -300);
-```
-
-Interactive Tables support Time Travel even with streaming ingestion.
-
----
-
-## Streamlit Dashboard (Optional)
-
-After completing the lab exercises, deploy a live dashboard against the same `ARCADE_SCORES` data.
-
-See **[STREAMLIT.md](STREAMLIT.md)** for full setup instructions — install the Snowflake CLI and Cortex CLI, generate a PAT via `sql/04_generate_pat.sql`, and deploy the dashboard.
-
----
-
-## Concurrency Testing with JMeter (Optional)
-
-The `jmeter/` directory contains a load test plan that simulates concurrent users
-querying the warehouse. This demonstrates the Interactive Warehouse's ability
-to handle high concurrency without queuing.
-
-### Install JMeter
-
-**macOS:**
-```bash
-brew install jmeter
-```
-
-**Linux (Debian/Ubuntu):**
-```bash
-sudo apt-get update
-sudo apt-get install jmeter
-```
-
-**Windows or manual install:**
-Download from https://jmeter.apache.org/download_jmeter.cgi
-
-### Download Snowflake JDBC driver
-
-Download the driver and install it to JMeter's lib directory:
-
-```bash
-cd jmeter
-
-# Download the driver
-curl -L -o snowflake-jdbc.jar https://repo1.maven.org/maven2/net/snowflake/snowflake-jdbc/3.16.1/snowflake-jdbc-3.16.1.jar
-
-# Copy to JMeter lib directory (macOS with Homebrew)
-cp snowflake-jdbc.jar $(brew --prefix)/Cellar/jmeter/*/libexec/lib/
-
-# Or for manual JMeter installation
-# cp snowflake-jdbc.jar $JMETER_HOME/lib/
-```
-
-The test runner script will attempt to install the driver automatically, but manual installation ensures it works correctly.
-
-### Run the concurrency test
-
-**Set up environment variables:**
-
-```bash
-export SNOWFLAKE_ACCOUNT=xy12345
-export SNOWFLAKE_PRIVATE_KEY_FILE=/path/to/rsa_key.p8
-
-# Optional - defaults to ARCADE_STREAMING_USER from setup
-# export SNOWFLAKE_USER=ARCADE_STREAMING_USER
-```
-
-> **Note:** The test uses the `ARCADE_STREAMING_USER` created in the setup script with RSA key authentication.
-
-**Example:**
-
-```bash
-export SNOWFLAKE_ACCOUNT=YOUR_ORG-YOUR_ACCOUNT
-export SNOWFLAKE_PRIVATE_KEY_FILE=/full/path/to/rsa_key.p8
-```
-
-**Test Interactive Warehouse (SUMMIT_INT_WH):**
-
-```bash
-cd jmeter
-./run_concurrency_test.sh SUMMIT_INT_WH
-```
-
-**Test Traditional Warehouse (SUMMIT_TRAD_WH):**
-
-```bash
-cd jmeter
-./run_concurrency_test.sh SUMMIT_TRAD_WH
-```
-
-The script will:
-1. Run 50 concurrent threads for 30 seconds
-2. Execute 5 different queries randomly
-3. Generate an HTML report in `results_WAREHOUSE_TIMESTAMP/`
-4. Display summary statistics
-
-**View the HTML report:**
-```bash
-open results_SUMMIT_INT_WH_*/index.html
-```
-
-### Expected results
-
-| Metric | SUMMIT_INT_WH (Interactive) | SUMMIT_TRAD_WH (Traditional) |
-|---|---|---|
-| Throughput | higher | lower |
-| Avg Latency | sub-second | several seconds |
-| Min Latency | sub-second | 1+ seconds |
-| Concurrency | Handles 50 concurrent users smoothly | Queue delays with high concurrency |
-
-The Interactive Warehouse achieves significantly higher throughput and lower latency
-because it uses a shared SSD cache and pre-computed indexes optimized for the
-associated Interactive Tables.
-
-### Customize the test
-
-Edit `jmeter/concurrency_test.jmx` to adjust:
-- Thread count: `ThreadGroup.num_threads` (default 50)
-- Test duration: `ThreadGroup.duration` (default 30 seconds)
-- Queries: Add or modify `JDBCSampler` elements
-
-### Troubleshooting
-
-**Connection errors:**
-- Verify `SNOWFLAKE_PRIVATE_KEY_FILE` is an absolute path (output by `bash sql/02_service_auth.sh`)
-- Ensure `ARCADE_STREAMING_USER` has been created (run `sql/01_setup.sql`)
-- Confirm RSA public key is registered on the user (run `bash sql/02_service_auth.sh` and paste SQL into Snowsight)
-
-**JDBC driver not found:**
-- Download the driver: `cd jmeter && curl -L -o snowflake-jdbc.jar https://repo1.maven.org/maven2/net/snowflake/snowflake-jdbc/3.16.1/snowflake-jdbc-3.16.1.jar`
-
-**No data returned:**
-- Ensure the arcade streamer is running (`python/arcade_streamer.py`)
-- Verify data exists: `SELECT COUNT(*) FROM ARCADE_DB.PUBLIC.ARCADE_SCORES`
-
----
-
-## Interactive Warehouse Key Facts
+## Interactive Warehouse key facts
 
 | Property | Value |
 |---|---|
@@ -368,61 +76,13 @@ Edit `jmeter/concurrency_test.jmx` to adjust:
 
 ---
 
-## Streamer Options
-
-```bash
-# Default: 1 channel, unlimited rows/sec, runs until Ctrl-C
-python arcade_streamer.py
-
-# Throttled demo (50 rows/sec)
-python arcade_streamer.py --rate 50
-
-# Multi-channel high-throughput (4 channels, unlimited)
-python arcade_streamer.py --channels 4
-
-# Insert exactly 10,000 rows then stop
-python arcade_streamer.py --rows 10000
-
-# Preview generated data without connecting to Snowflake
-python arcade_streamer.py --dry-run --rows 5
-```
-
----
-
-## Data Model
-
-### `ARCADE_SCORES` (Interactive Table)
-
-
-| Column | Type | Notes |
-|---|---|---|
-| `SCORE_ID` | VARCHAR(36) | Session UUID |
-| `PLAYER_ID` | VARCHAR(36) | Stable player UUID (500-player pool) |
-| `PLAYER_NAME` | VARCHAR(64) | Display name |
-| `PLAYER_COUNTRY` / `PLAYER_CITY` | VARCHAR | Geographic origin |
-| `LATITUDE` / `LONGITUDE` | FLOAT | GPS coordinates |
-| `GAME_NAME` | VARCHAR(64) | One of 20 classic arcade titles |
-| `GAME_MODE` | VARCHAR(32) | classic (50%) · tournament · co-op · survival · speed-run |
-| `PLATFORM` | VARCHAR(32) | arcade · console · mobile · pc (game-specific weights) |
-| `SCORE` | NUMBER(12,0) | Power-law distributed by skill tier |
-| `LEVEL_REACHED` | NUMBER(4,0) | Correlated with score |
-| `DURATION_SECONDS` | NUMBER(6,0) | Correlated with level |
-| `LIVES_REMAINING` | NUMBER(2,0) | Inversely correlated with score |
-| `ACCURACY_PCT` | FLOAT | Nullable; correlated with skill tier |
-| `ACHIEVEMENT` | VARCHAR(64) | Rare contextual badge (nullable) |
-| `GAME_ENDED_AT` | TIMESTAMP_NTZ | When the score was generated and sent — UTC, client clock **(clustering key)** |
-
----
-
 ## Cleanup
 
-Open **`sql/05_cleanup.sql`** in Snowsight and run it.
-
-Drops (in order): the Streamlit dashboard, compute pool, both warehouses, database (cascades to all tables and pipes), service user, and roles.
+Open **`sql/05_cleanup.sql`** in Snowsight and run it. Drops (in order): the Streamlit dashboard, compute pool, both warehouses, database (cascades to all tables and pipes), service user, and roles.
 
 ---
 
-## File Structure
+## File structure
 
 ```
 Summit26-InteractiveLab/
@@ -431,12 +91,25 @@ Summit26-InteractiveLab/
 ├── requirements.txt                 Snowpipe Streaming SDK dep
 ├── profile.json.example
 ├── .gitignore
+├── .devcontainer/
+│   └── devcontainer.json            GitHub Codespaces / Dev Container config
+├── scripts/
+│   └── install_jmeter.sh            Installs JMeter 5.x + Snowflake JDBC driver
+├── docs/
+│   ├── 00-choose-your-environment.md
+│   ├── 01-env-codespaces.md
+│   ├── 02-env-devcontainer.md
+│   ├── 03-env-local.md
+│   ├── 04-snowflake-setup.md
+│   ├── 05-start-streaming.md
+│   ├── 06-exercises.md
+│   └── 07-jmeter.md
 ├── sql/
-│   ├── 01_setup.sql                 Full Snowflake provisioning (incl. compute pool)
-│   ├── 02_service_auth.sh           Generates RSA key pair + outputs ALTER USER SQL
+│   ├── 01_setup.sql                 Full Snowflake provisioning
+│   ├── 02_service_auth.sh           RSA key pair + network policy SQL
 │   ├── 03_lab_queries.sql           11 exercises + bonus queries
-│   ├── 04_generate_pat.sql          Generate PAT for Cortex CLI + snow connection add command
-│   └── 05_cleanup.sql               Teardown (dashboard, pool, warehouses, DB, users)
+│   ├── 04_generate_pat.sql          Generate PAT for Cortex CLI
+│   └── 05_cleanup.sql               Teardown
 ├── python/
 │   ├── config.py                    Game catalogue, cities, skill tiers
 │   ├── generator.py                 Realistic score generator
